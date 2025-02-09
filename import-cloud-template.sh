@@ -1,35 +1,24 @@
 #!/bin/bash
+# Purpose: Download images and create Proxmox VM templates with cloud-init configuration
 
 set -exo pipefail
 
 #
 # Configure your settings here
 #
-
 STORAGE=local-zfs
 CI_USER=${USER}
 SSH_KEY=/home/${CI_USER}/.ssh/id_ed25519.pub
 
-INSTALL_DOCKER=false
-
-# Check if CONFIG_FILE is set
-if [[ -z "$CONFIG_FILE" ]]; then
-    echo "Usage: $0 [--install-docker] [-c config_file]"
-    exit 1
-fi
-
 # Parse command-line arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        --install-docker)
-            INSTALL_DOCKER=true
-            ;;
         -c)
             if [[ -z "$2" ]]; then
-                echo "Error: Missing config file."
+                echo "Error: Missing config file parameter."
                 exit 1
             elif [[ -f "$2" ]]; then
-                CONFIG_FILE=$2
+                CONFIG_FILE="$2"
                 source "$CONFIG_FILE"
                 shift
             else
@@ -38,28 +27,33 @@ while [[ "$#" -gt 0 ]]; do
             fi
             ;;
         *)
-            echo "Usage: $0 [--install-docker] [-c config_file]"
+            echo "Usage: $0 [-c config_file]"
+            echo "Config file must define the variables: OS_NAME, OS_VERSION, IMAGE_NAME, DOWNLOAD_URL, VMID, IMAGE_SIZE and CLOUD_INIT_CONFIG"
             exit 1
             ;;
     esac
     shift
 done
 
-VM_NAME="${OS_NAME}-${OS_VERSION}-template"
-if [ "$INSTALL_DOCKER" = true ]; then
-    VM_NAME="${VM_NAME}-docker"
-    IMAGE_NAME="${IMAGE_NAME}-docker"
-    ((VMID++))
-fi
+# Validate required variables from config
+required_vars=("OS_NAME" "OS_VERSION" "IMAGE_NAME" "DOWNLOAD_URL" "VMID" "CLOUD_INIT_CONFIG")
+for var in "${required_vars[@]}"; do
+    if [[ -z "${!var}" ]]; then
+        echo "Error: $var must be set in config file"
+        exit 1
+    fi
+done
 
-rm -f $IMAGE_NAME
-wget $DOWNLOAD_URL -O $IMAGE_NAME
+VM_NAME="${OS_NAME}-${OS_VERSION}-template"
+
+rm -f "$IMAGE_NAME"
+wget "$DOWNLOAD_URL" -O "$IMAGE_NAME"
+qemu-img resize "$IMAGE_NAME" "$IMAGE_SIZE"
 
 #
 # Configure your template VM here
 #
-qemu-img resize $IMAGE_NAME 30G
-sudo qm destroy $VMID --destroy-unreferenced-disks || true
+sudo qm destroy $VMID --destroy-unreferenced-disks && echo "Destroyed existing VM/template: $VMID" || true
 sudo qm create $VMID --name "$VM_NAME" \
     --ostype l26 \
     --memory 1024 --balloon 8192 \
@@ -78,33 +72,11 @@ sudo qm set $VMID --scsi1 $STORAGE:cloudinit
 # Note: Snippets need to be enabled for the data store in Proxmox
 # See: https://pve.proxmox.com/pve-docs/pve-admin-guide.html#_common_storage_properties
 
-cat << EOF | sudo tee /var/lib/vz/snippets/$VM_NAME.yaml
-#cloud-config
-runcmd:
-    - apt-get update
-    - apt-get install -y qemu-guest-agent gnupg
-EOF
-
-if [ "$INSTALL_DOCKER" = true ]; then
-  cat << EOF | sudo tee -a /var/lib/vz/snippets/$VM_NAME.yaml
-    - install -m 0755 -d /etc/apt/keyrings
-    - curl -fsSL https://download.docker.com/linux/${OS_NAME}/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    - chmod a+r /etc/apt/keyrings/docker.gpg
-    - |
-      echo "deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-      https://download.docker.com/linux/${OS_NAME} \$(. /etc/os-release && echo \$VERSION_CODENAME) stable" | \
-      tee /etc/apt/sources.list.d/docker.list > /dev/null
-    - apt-get update
-    - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-EOF
-fi
-
-cat << EOF | sudo tee -a /var/lib/vz/snippets/$VM_NAME.yaml
-    - reboot
-EOF
+# Apply cloud-init configuration
+echo "$CLOUD_INIT_CONFIG" | sudo tee /var/lib/vz/snippets/${VMID}.yaml
 
 # Create the VM
-sudo qm set $VMID --cicustom "vendor=local:snippets/${VM_NAME}.yaml"
+sudo qm set $VMID --cicustom "vendor=local:snippets/${VMID}.yaml"
 sudo qm set $VMID --tags ${VM_NAME},${OS_NAME}-${OS_VERSION},cloudinit
 sudo qm set $VMID --ciuser ${CI_USER}
 sudo qm set $VMID --sshkeys ${SSH_KEY}
@@ -112,3 +84,5 @@ sudo qm set $VMID --ipconfig0 ip=dhcp
 
 # Convert the VM to a template
 sudo qm template $VMID
+
+echo "Successfully created template $VM_NAME (ID: $VMID)"
