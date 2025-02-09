@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -eo pipefail
+set -exo pipefail
 
 #
 # Configure your settings here
@@ -27,6 +27,7 @@ if [[ "$#" -gt 2 ]]; then
     echo "Usage: $0 [--install-docker] [-c config_file]"
     exit 1
 fi
+done
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -106,7 +107,7 @@ EOF
 
 sudo qm set $VMID --cicustom "vendor=local:snippets/${VM_NAME}.yaml"
 sudo qm set $VMID --tags ${VM_NAME},${OS_NAME}-${OS_VERSION},cloudinit
-sudo qm set $VMID --ciCI_user ${CI_USER}
+sudo qm set $VMID --ciuser ${CI_USER}
 sudo qm set $VMID --sshkeys ${SSH_KEY}
 sudo qm set $VMID --ipconfig0 ip=dhcp
 sudo qm template $VMID
