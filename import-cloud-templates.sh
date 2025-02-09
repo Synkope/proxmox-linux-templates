@@ -17,23 +17,6 @@ while [[ "$#" -gt 0 ]]; do
         --install-docker)
             INSTALL_DOCKER=true
             ;;
-        *)
-            echo "Usage: $0 [--install-docker]"
-            exit 1
-            ;;
-    esac
-    shift
-if [[ "$#" -gt 2 ]]; then
-    echo "Usage: $0 [--install-docker] [-c config_file]"
-    exit 1
-fi
-done
-
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-        --install-docker)
-            INSTALL_DOCKER=true
-            ;;
         -c)
             if [[ -n "$2" && -f "$2" ]]; then
                 CONFIG_FILE=$2
