@@ -7,9 +7,10 @@ set -exo pipefail
 #
 
 STORAGE=local-zfs
-INSTALL_DOCKER=false
 CI_USER=${USER}
 SSH_KEY=/home/${CI_USER}/.ssh/id_ed25519.pub
+
+INSTALL_DOCKER=false
 
 # Parse command-line arguments
 while [[ "$#" -gt 0 ]]; do
@@ -64,6 +65,10 @@ sudo qm set $VMID --boot order=virtio0
 sudo qm set $VMID --scsi1 $STORAGE:cloudinit
 
 # Create cloud-init configuration
+#
+# Note: Snippets need to be enabled for the data store in Proxmox
+# See: https://pve.proxmox.com/pve-docs/pve-admin-guide.html#_common_storage_properties
+
 cat << EOF | sudo tee /var/lib/vz/snippets/$VM_NAME.yaml
 #cloud-config
 runcmd:
