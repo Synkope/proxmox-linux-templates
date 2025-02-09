@@ -36,7 +36,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # Validate required variables from config
-required_vars=("OS_NAME" "OS_VERSION" "IMAGE_NAME" "DOWNLOAD_URL" "VMID" "CLOUD_INIT_CONFIG")
+required_vars=("OS_NAME" "OS_VERSION" "IMAGE_NAME" "IMAGE_SIZE" "DOWNLOAD_URL" "VMID" "CLOUD_INIT_CONFIG")
 for var in "${required_vars[@]}"; do
     if [[ -z "${!var}" ]]; then
         echo "Error: $var must be set in config file"
