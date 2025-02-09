@@ -12,6 +12,12 @@ SSH_KEY=/home/${CI_USER}/.ssh/id_ed25519.pub
 
 INSTALL_DOCKER=false
 
+# Check if CONFIG_FILE is set
+if [[ -z "$CONFIG_FILE" ]]; then
+    echo "Usage: $0 [--install-docker] [-c config_file]"
+    exit 1
+fi
+
 # Parse command-line arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
