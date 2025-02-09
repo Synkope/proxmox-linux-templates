@@ -19,7 +19,10 @@ while [[ "$#" -gt 0 ]]; do
             INSTALL_DOCKER=true
             ;;
         -c)
-            if [[ -n "$2" && -f "$2" ]]; then
+            if [[ -z "$2" ]]; then
+                echo "Error: Missing config file."
+                exit 1
+            elif [[ -f "$2" ]]; then
                 CONFIG_FILE=$2
                 source "$CONFIG_FILE"
                 shift
@@ -47,7 +50,7 @@ rm -f $IMAGE_NAME
 wget $DOWNLOAD_URL -O $IMAGE_NAME
 
 #
-# Configure your template here
+# Configure your template VM here
 #
 qemu-img resize $IMAGE_NAME 30G
 sudo qm destroy $VMID --destroy-unreferenced-disks || true
@@ -89,13 +92,17 @@ if [ "$INSTALL_DOCKER" = true ]; then
     - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 EOF
 fi
+
 cat << EOF | sudo tee -a /var/lib/vz/snippets/$VM_NAME.yaml
     - reboot
 EOF
 
+# Create the VM
 sudo qm set $VMID --cicustom "vendor=local:snippets/${VM_NAME}.yaml"
 sudo qm set $VMID --tags ${VM_NAME},${OS_NAME}-${OS_VERSION},cloudinit
 sudo qm set $VMID --ciuser ${CI_USER}
 sudo qm set $VMID --sshkeys ${SSH_KEY}
 sudo qm set $VMID --ipconfig0 ip=dhcp
+
+# Convert the VM to a template
 sudo qm template $VMID
