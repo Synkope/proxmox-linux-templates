@@ -53,7 +53,15 @@ qemu-img resize "$IMAGE_NAME" "$IMAGE_SIZE"
 #
 # Configure your template VM here
 #
-sudo qm destroy $VMID --destroy-unreferenced-disks && echo "Destroyed existing VM/template: $VMID" || true
+if sudo qm status $VMID &>/dev/null; then
+    sudo qm destroy $VMID --destroy-unreferenced-disks && echo "Destroyed existing VM/template: $VMID"
+fi
+
+if [ $? -ne 0 ]; then
+    echo "Failed to destroy existing VM/template: $VMID. Do you have linked clones tied to the template disk?"
+    exit 1
+fi
+
 sudo qm create $VMID --name "$VM_NAME" \
     --ostype l26 \
     --memory 1024 --balloon 8192 \
