@@ -64,7 +64,7 @@ fi
 
 sudo qm create $VMID --name "$VM_NAME" \
     --ostype l26 \
-    --memory 1024 --balloon 8192 \
+    --memory 8192 --balloon 1024 \
     --agent 1 \
     --bios ovmf  --efidisk0 $STORAGE:0,pre-enrolled-keys=0 \
     --cpu host --cores 2  \
