@@ -6,9 +6,11 @@ set -exo pipefail
 #
 # Configure your settings here
 #
-STORAGE=local-zfs
-CI_USER=${USER}
-SSH_KEY=/home/${CI_USER}/.ssh/id_ed25519.pub
+STORAGE=${STORAGE:-"local-zfs"}
+CI_USER=${CI_USER:-${USER}}
+SSH_KEY=${SSH_KEY:-"/home/${CI_USER}/.ssh/id_ed25519.pub"}
+# Control VM deletion behavior: "skip" = skip if exists, "force" = always delete
+DELETION_MODE=${DELETION_MODE:-"skip"}
 
 # Parse command-line arguments
 while [[ "$#" -gt 0 ]]; do
@@ -26,9 +28,17 @@ while [[ "$#" -gt 0 ]]; do
                 exit 1
             fi
             ;;
+        --force)
+            DELETION_MODE="force"
+            ;;
+        --skip)
+            DELETION_MODE="skip"
+            ;;
         *)
-            echo "Usage: $0 [-c config_file]"
+            echo "Usage: $0 [-c config_file] [--force|--skip]"
             echo "Config file must define the variables: OS_NAME, OS_VERSION, IMAGE_NAME, DOWNLOAD_URL, VMID, IMAGE_SIZE and CLOUD_INIT_CONFIG"
+            echo "  --skip:  Skip creation if VM/template already exists (default)"
+            echo "  --force: Delete existing VM/template"
             exit 1
             ;;
     esac
@@ -54,12 +64,19 @@ qemu-img resize "$IMAGE_NAME" "$IMAGE_SIZE"
 # Configure your template VM here
 #
 if sudo qm status $VMID &>/dev/null; then
-    sudo qm destroy $VMID --destroy-unreferenced-disks && echo "Destroyed existing VM/template: $VMID"
-fi
-
-if [ $? -ne 0 ]; then
-    echo "Failed to destroy existing VM/template: $VMID. Do you have linked clones tied to the template disk?"
-    exit 1
+    if [ "$DELETION_MODE" = "skip" ]; then
+        echo "VM/template $VMID already exists. Skipping creation (DELETION_MODE=skip)."
+        exit 0
+    elif [ "$DELETION_MODE" = "force" ]; then
+        sudo qm destroy $VMID --destroy-unreferenced-disks && echo "Destroyed existing VM/template: $VMID"
+        if [ $? -ne 0 ]; then
+            echo "Failed to destroy existing VM/template: $VMID. Do you have linked clones tied to the template disk?"
+            exit 1
+        fi
+    else
+        echo "Invalid DELETION_MODE: $DELETION_MODE. Use 'force' or 'skip'."
+        exit 1
+    fi
 fi
 
 sudo qm create $VMID --name "$VM_NAME" \
