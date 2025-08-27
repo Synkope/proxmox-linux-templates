@@ -1,9 +1,9 @@
 # proxmox scripts
 
-Download cloud images for Debian or Ubuntu and create a Proxmox template
-with a basic `cloud-init` configuration. 
+Download cloud images for multiple Linux distributions and create Proxmox templates
+with optimized `cloud-init` configurations.
 
-Easily extendible with new configurations for Debian based Linux distributions.
+Supports Debian, Ubuntu, Fedora, and AlmaLinux with optional Docker pre-installation.
 
 ## Prerequisites
 * `sudo`
@@ -16,10 +16,41 @@ Easily extendible with new configurations for Debian based Linux distributions.
 *  **Any existing VM or template with ID or `VM_ID++` `VM_ID` will be deleted**!
 
 ## Included configs
-* `debian-12`
-*  `ubuntu-24.04`
+* **Debian**: `debian-12`, `debian-13` (current stable)
+* **Ubuntu**: `ubuntu-24.04` (LTS), `ubuntu-25.04` (latest)
+* **Fedora**: `fedora-42` (latest)
+* **AlmaLinux**: `almalinux-9`, `almalinux-10` (latest)
+* **Docker variants**: Available for Debian and Ubuntu distributions
+
+## VMID Assignments
+| Distribution | Basic | Docker |
+|--------------|-------|---------|
+| **Debian 12** | 5100 | 5150 |
+| **Debian 13** | 5200 | 5250 |
+| **Ubuntu 24.04 LTS** | 5300 | 5350 |
+| **Ubuntu 25.04** | 5400 | 5450 |
+| **Fedora 42** | 5500 | - |
+| **AlmaLinux 9** | 5600 | - |
+| **AlmaLinux 10** | 5700 | - |
 
 ## Usage
+
+### Direct Script Usage
 ```shell
-$ ./import-cloud-template.sh [--install-docker] -c config-file.conf
+$ ./import-cloud-template.sh -c config-file.conf
+```
+
+### Makefile Targets (Recommended)
+```shell
+# Debian
+make debian-12 debian-12-docker debian-13 debian-13-docker
+
+# Ubuntu  
+make ubuntu-24.04 ubuntu-24.04-docker ubuntu-25.04 ubuntu-25.04-docker
+
+# RHEL-like distros
+make fedora-42 almalinux-9 almalinux-10
+
+# Build all templates
+make all
 ```
