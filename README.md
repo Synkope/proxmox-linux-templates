@@ -1,4 +1,4 @@
-# proxmox scripts
+# proxmox-linux-templates
 
 Download cloud images for multiple Linux distributions and create Proxmox templates
 with optimized `cloud-init` configurations.
@@ -10,10 +10,11 @@ Supports Debian, Ubuntu, Fedora, and AlmaLinux with optional Docker pre-installa
 * An SSH public key in the running user's home directory
 
 ## Preparation
-* Configure snippets [storage](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#_common_storage_properties)
-* Configure settings in the script
-* Check the `VM_ID` in the config files. 
-*  **Any existing VM or template with ID or `VM_ID++` `VM_ID` will be deleted**!
+* Configure snippets [storage](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#_common_storage_properties) in Proxmox
+* Ensure your SSH public key exists at `~/.ssh/id_ed25519.pub` (or update `SSH_KEY` path in the script)
+* Review the VMID assignments in the table below
+* **⚠️ WARNING: Any existing VM or template with matching VMIDs will be destroyed!**
+* Optional: Modify `STORAGE` setting in the script (defaults to `local-zfs`)
 
 ## Included configs
 * **Debian**: `debian-12`, `debian-13` (current stable)
