@@ -21,20 +21,22 @@ Supports Debian, Ubuntu, Fedora, and AlmaLinux with optional Docker pre-installa
 
 ## Included Configurations
 
-- **Debian**: `debian-12`, `debian-13` (current stable)
-- **Ubuntu**: `ubuntu-24.04` (LTS), `ubuntu-25.04` (latest)
-- **Fedora**: `fedora-42` (latest)
+- **Debian**: `debian-12` (oldstable), `debian-13` (stable)
+- **Ubuntu**: `ubuntu-24.04` (previous LTS), `ubuntu-26.04` (current LTS)
+- **Fedora**: `fedora-43` (previous), `fedora-44` (current)
 - **AlmaLinux**: `almalinux-9`, `almalinux-10` (latest)
 - **Docker variants**: Available for Debian and Ubuntu distributions
 
 ## VMID Assignments
+
 | Distribution | Basic | Docker |
-|--------------|-------|---------|
+|--------------|-------|--------|
 | **Debian 12** | 5100 | 5150 |
 | **Debian 13** | 5200 | 5250 |
 | **Ubuntu 24.04 LTS** | 5300 | 5350 |
-| **Ubuntu 25.04** | 5400 | 5450 |
-| **Fedora 42** | 5500 | - |
+| **Ubuntu 26.04 LTS** | 5400 | 5450 |
+| **Fedora 43** | 5900 | - |
+| **Fedora 44** | 5950 | - |
 | **AlmaLinux 9** | 5600 | - |
 | **AlmaLinux 10** | 5700 | - |
 
@@ -51,6 +53,9 @@ Supports Debian, Ubuntu, Fedora, and AlmaLinux with optional Docker pre-installa
 
 # Force deletion of existing templates
 ./import-cloud-template.sh -c config-file.conf --force
+
+# Re-download image even if already cached
+./import-cloud-template.sh -c config-file.conf --refresh
 ```
 
 ### Makefile Targets (Recommended)
@@ -60,10 +65,10 @@ Supports Debian, Ubuntu, Fedora, and AlmaLinux with optional Docker pre-installa
 make debian-12 debian-12-docker debian-13 debian-13-docker
 
 # Ubuntu
-make ubuntu-24.04 ubuntu-24.04-docker ubuntu-25.04 ubuntu-25.04-docker
+make ubuntu-24.04 ubuntu-24.04-docker ubuntu-26.04 ubuntu-26.04-docker
 
 # Enterprise/Rolling Release
-make fedora-42 almalinux-9 almalinux-10
+make fedora-43 fedora-44 almalinux-9 almalinux-10
 
 # Build all templates
 make all
@@ -76,24 +81,21 @@ The script supports several configurable options that can be set via environment
 ### Storage Configuration
 - **STORAGE** - Proxmox storage name for VM disks and cloud-init
 - **Default**: `local-zfs`
-- **Usage**: Where VM disks and templates will be stored
 
-### User Configuration  
+### User Configuration
 - **CI_USER** - Username for cloud-init and SSH access
 - **Default**: Current user (`$USER`)
-- **Usage**: Default user account created in VMs
 
 ### SSH Configuration
 - **SSH_KEY** - Path to SSH public key file
-- **Default**: `~/.ssh/id_ed25519.pub`  
-- **Usage**: Public key injected into VMs for passwordless access
+- **Default**: `~/.ssh/id_ed25519.pub`
 
 ### Setting Configuration Options
 
 ```bash
 # Method 1: Environment variables
 export STORAGE="local-lvm"
-export CI_USER="admin" 
+export CI_USER="admin"
 export SSH_KEY="/path/to/custom/key.pub"
 make debian-13
 
@@ -103,30 +105,41 @@ STORAGE="nvme-pool" ./import-cloud-template.sh -c ubuntu-24.04-cloud.conf
 # Method 3: In shell session
 export STORAGE="ceph-storage"
 export CI_USER="devops"
-./import-cloud-template.sh -c fedora-42-cloud.conf
+./import-cloud-template.sh -c fedora-43-cloud.conf
 ```
 
 ## Deletion Control
 
-By default, the script will **skip creation if a VM/template already exists** (safe mode). You can control this behavior:
+By default, the script will **skip creation if a VM/template already exists** (safe mode).
 
 ### Command Line Options
 
 - `--skip` - Skip creation if VM/template already exists (default)
 - `--force` - Delete existing VM/template
+- `--refresh` - Re-download the cloud image even if a local copy is cached
 
 ### Environment Variables
 
 ```bash
-# Deletion behavior
 export DELETION_MODE="skip"   # Default - skip existing templates
 export DELETION_MODE="force"  # Force mode - delete existing templates
-
-# Combined example with all configurable options
-export STORAGE="local-lvm"
-export CI_USER="admin"
-export SSH_KEY="/home/admin/.ssh/id_rsa.pub"
-export DELETION_MODE="skip"
-make all
 ```
 
+## Versioning Policy
+
+Each distro family keeps **current stable + one previous LTS/stable**. Interim/non-LTS releases are removed when they reach EOL. When adding a new conf file, check the distro's EOL calendar and remove any release that has fallen out of the support window.
+
+| Family | Policy |
+|--------|--------|
+| Debian | current stable + previous stable |
+| Ubuntu | current LTS + previous LTS (interim releases excluded) |
+| Fedora | current + previous release (~13 month lifecycle each) |
+| AlmaLinux | all active RHEL-aligned major versions |
+
+## Adding a New Distribution Version
+
+1. Create `<distro>-<version>-cloud.conf` (copy an existing conf as a template)
+2. Set `VMID`, `OS_NAME`, `OS_VERSION`, `OS_CODENAME`, `IMAGE_NAME`, `IMAGE_SIZE`, `DOWNLOAD_URL`, `CHECKSUM_URL`, and `CLOUD_INIT_CONFIG`
+3. Add the target name to `DISTROS` in `Makefile`
+4. Remove any conf files for versions that have passed EOL
+5. Update this README (VMID table and Included Configurations)
