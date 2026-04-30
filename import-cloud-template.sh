@@ -9,14 +9,14 @@ SSH_KEY=${SSH_KEY:-"/home/${CI_USER}/.ssh/id_ed25519.pub"}
 DELETION_MODE=${DELETION_MODE:-"skip"}
 REFRESH=${REFRESH:-"false"}
 
-DOWNLOAD_STARTED=false
+IMAGE_PREEXISTED=false
 VM_CREATED=false
 
 cleanup() {
     local exit_code=$?
     [[ $exit_code -eq 0 ]] && return
     echo "Error occurred, cleaning up..."
-    if [[ "$DOWNLOAD_STARTED" == "true" && "$REFRESH" != "true" ]]; then
+    if [[ "$IMAGE_PREEXISTED" == "false" ]]; then
         rm -f "$IMAGE_NAME"
     fi
     if [[ "$VM_CREATED" == "true" ]]; then
@@ -70,18 +70,17 @@ validate_config() {
 
 download_image() {
     if [[ -f "$IMAGE_NAME" && "$REFRESH" != "true" ]]; then
+        IMAGE_PREEXISTED=true
         echo "Using cached image: $IMAGE_NAME"
     else
-        DOWNLOAD_STARTED=true
         wget "$DOWNLOAD_URL" -O "$IMAGE_NAME"
     fi
-    qemu-img resize "$IMAGE_NAME" "$IMAGE_SIZE"
 }
 
 verify_checksum() {
     local checksum_file
     checksum_file=$(mktemp)
-    wget -q "$CHECKSUM_URL" -O "$checksum_file"
+    wget -q "$CHECKSUM_URL" -O "$checksum_file" || { rm -f "$checksum_file"; exit 1; }
 
     local expected
     if grep -q "($IMAGE_NAME)" "$checksum_file"; then
@@ -158,6 +157,7 @@ parse_args "$@"
 validate_config
 download_image
 verify_checksum
+qemu-img resize "$IMAGE_NAME" "$IMAGE_SIZE"
 create_vm
 configure_cloud_init
 convert_to_template
