@@ -73,14 +73,20 @@ download_image() {
         IMAGE_PREEXISTED=true
         echo "Using cached image: $IMAGE_NAME"
     else
+        echo "Downloading: $DOWNLOAD_URL"
         wget "$DOWNLOAD_URL" -O "$IMAGE_NAME"
     fi
 }
 
 verify_checksum() {
+    echo "Fetching checksum file: $CHECKSUM_URL"
     local checksum_file
     checksum_file=$(mktemp)
-    wget -q "$CHECKSUM_URL" -O "$checksum_file" || { rm -f "$checksum_file"; exit 1; }
+    wget -q "$CHECKSUM_URL" -O "$checksum_file" || {
+        echo "Error: Failed to download checksum file from $CHECKSUM_URL (HTTP error or URL not found)"
+        rm -f "$checksum_file"
+        exit 1
+    }
 
     local expected
     if grep -q "($IMAGE_NAME)" "$checksum_file"; then
@@ -93,12 +99,17 @@ verify_checksum() {
     rm -f "$checksum_file"
 
     if [[ -z "$expected" ]]; then
-        echo "Error: Could not find checksum for $IMAGE_NAME in $CHECKSUM_URL"
+        echo "Error: Could not find entry for '$IMAGE_NAME' in $CHECKSUM_URL"
         exit 1
     fi
 
+    echo "Computing checksum: $IMAGE_NAME"
     local actual
-    actual=$(sha256sum "$IMAGE_NAME" | awk '{print $1}')
+    if [[ "$CHECKSUM_URL" == *SHA512* || "$CHECKSUM_URL" == *sha512* ]]; then
+        actual=$(sha512sum "$IMAGE_NAME" | awk '{print $1}')
+    else
+        actual=$(sha256sum "$IMAGE_NAME" | awk '{print $1}')
+    fi
 
     if [[ "$expected" != "$actual" ]]; then
         echo "Error: Checksum mismatch for $IMAGE_NAME"
@@ -106,7 +117,12 @@ verify_checksum() {
         echo "  Actual:   $actual"
         exit 1
     fi
-    echo "Checksum verified: $IMAGE_NAME"
+    echo "Checksum OK: $IMAGE_NAME"
+}
+
+resize_image() {
+    echo "Resizing image to $IMAGE_SIZE"
+    qemu-img resize "$IMAGE_NAME" "$IMAGE_SIZE"
 }
 
 create_vm() {
@@ -157,7 +173,7 @@ parse_args "$@"
 validate_config
 download_image
 verify_checksum
-qemu-img resize "$IMAGE_NAME" "$IMAGE_SIZE"
+resize_image
 create_vm
 configure_cloud_init
 convert_to_template
