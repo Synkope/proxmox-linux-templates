@@ -1,113 +1,163 @@
 #!/bin/bash
 # Purpose: Download images and create Proxmox VM templates with cloud-init configuration
 
-set -exo pipefail
+set -eo pipefail
 
-#
-# Configure your settings here
-#
 STORAGE=${STORAGE:-"local-zfs"}
 CI_USER=${CI_USER:-${USER}}
 SSH_KEY=${SSH_KEY:-"/home/${CI_USER}/.ssh/id_ed25519.pub"}
-# Control VM deletion behavior: "skip" = skip if exists, "force" = always delete
 DELETION_MODE=${DELETION_MODE:-"skip"}
+REFRESH=${REFRESH:-"false"}
 
-# Parse command-line arguments
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-        -c)
-            if [[ -z "$2" ]]; then
-                echo "Error: Missing config file parameter."
-                exit 1
-            elif [[ -f "$2" ]]; then
-                CONFIG_FILE="$2"
-                source "$CONFIG_FILE"
-                shift
-            else
-                echo "Error: Invalid or missing config file."
-                exit 1
-            fi
-            ;;
-        --force)
-            DELETION_MODE="force"
-            ;;
-        --skip)
-            DELETION_MODE="skip"
-            ;;
-        *)
-            echo "Usage: $0 [-c config_file] [--force|--skip]"
-            echo "Config file must define the variables: OS_NAME, OS_VERSION, IMAGE_NAME, DOWNLOAD_URL, VMID, IMAGE_SIZE and CLOUD_INIT_CONFIG"
-            echo "  --skip:  Skip creation if VM/template already exists (default)"
-            echo "  --force: Delete existing VM/template"
-            exit 1
-            ;;
-    esac
-    shift
-done
+DOWNLOAD_STARTED=false
+VM_CREATED=false
 
-# Validate required variables from config
-required_vars=("OS_NAME" "OS_VERSION" "IMAGE_NAME" "IMAGE_SIZE" "DOWNLOAD_URL" "VMID" "CLOUD_INIT_CONFIG")
-for var in "${required_vars[@]}"; do
-    if [[ -z "${!var}" ]]; then
-        echo "Error: $var must be set in config file"
-        exit 1
+cleanup() {
+    local exit_code=$?
+    [[ $exit_code -eq 0 ]] && return
+    echo "Error occurred, cleaning up..."
+    if [[ "$DOWNLOAD_STARTED" == "true" && "$REFRESH" != "true" ]]; then
+        rm -f "$IMAGE_NAME"
     fi
-done
+    if [[ "$VM_CREATED" == "true" ]]; then
+        sudo qm destroy "$VMID" --destroy-unreferenced-disks 2>/dev/null || true
+    fi
+}
 
-VM_NAME="${OS_NAME}-${OS_VERSION}-template"
+trap cleanup EXIT
 
-rm -f "$IMAGE_NAME"
-wget "$DOWNLOAD_URL" -O "$IMAGE_NAME"
-qemu-img resize "$IMAGE_NAME" "$IMAGE_SIZE"
+parse_args() {
+    while [[ "$#" -gt 0 ]]; do
+        case $1 in
+            -c)
+                if [[ -z "$2" ]]; then
+                    echo "Error: Missing config file parameter."
+                    exit 1
+                elif [[ -f "$2" ]]; then
+                    source "$2"
+                    shift
+                else
+                    echo "Error: Invalid or missing config file."
+                    exit 1
+                fi
+                ;;
+            --force)    DELETION_MODE="force" ;;
+            --skip)     DELETION_MODE="skip" ;;
+            --refresh)  REFRESH="true" ;;
+            *)
+                echo "Usage: $0 [-c config_file] [--force|--skip] [--refresh]"
+                echo "Config file must define: OS_NAME, OS_VERSION, IMAGE_NAME, DOWNLOAD_URL, VMID, IMAGE_SIZE, CLOUD_INIT_CONFIG, CHECKSUM_URL"
+                echo "  --skip:    Skip creation if VM/template already exists (default)"
+                echo "  --force:   Delete existing VM/template"
+                echo "  --refresh: Re-download image even if cached"
+                exit 1
+                ;;
+        esac
+        shift
+    done
+}
 
-#
-# Configure your template VM here
-#
-if sudo qm status $VMID &>/dev/null; then
-    if [ "$DELETION_MODE" = "skip" ]; then
-        echo "VM/template $VMID already exists. Skipping creation (DELETION_MODE=skip)."
-        exit 0
-    elif [ "$DELETION_MODE" = "force" ]; then
-        sudo qm destroy $VMID --destroy-unreferenced-disks && echo "Destroyed existing VM/template: $VMID"
-        if [ $? -ne 0 ]; then
-            echo "Failed to destroy existing VM/template: $VMID. Do you have linked clones tied to the template disk?"
+validate_config() {
+    local required_vars=("OS_NAME" "OS_VERSION" "IMAGE_NAME" "IMAGE_SIZE" "DOWNLOAD_URL" "VMID" "CLOUD_INIT_CONFIG" "CHECKSUM_URL")
+    for var in "${required_vars[@]}"; do
+        if [[ -z "${!var}" ]]; then
+            echo "Error: $var must be set in config file"
             exit 1
         fi
+    done
+    VM_NAME="${OS_NAME}-${OS_VERSION}-template"
+}
+
+download_image() {
+    if [[ -f "$IMAGE_NAME" && "$REFRESH" != "true" ]]; then
+        echo "Using cached image: $IMAGE_NAME"
     else
-        echo "Invalid DELETION_MODE: $DELETION_MODE. Use 'force' or 'skip'."
+        DOWNLOAD_STARTED=true
+        wget "$DOWNLOAD_URL" -O "$IMAGE_NAME"
+    fi
+    qemu-img resize "$IMAGE_NAME" "$IMAGE_SIZE"
+}
+
+verify_checksum() {
+    local checksum_file
+    checksum_file=$(mktemp)
+    wget -q "$CHECKSUM_URL" -O "$checksum_file"
+
+    local expected
+    if grep -q "($IMAGE_NAME)" "$checksum_file"; then
+        # BSD format: SHA256 (filename) = hash
+        expected=$(grep "($IMAGE_NAME)" "$checksum_file" | awk '{print $NF}')
+    else
+        # GNU format: hash  filename
+        expected=$(grep "$IMAGE_NAME" "$checksum_file" | awk '{print $1}')
+    fi
+    rm -f "$checksum_file"
+
+    if [[ -z "$expected" ]]; then
+        echo "Error: Could not find checksum for $IMAGE_NAME in $CHECKSUM_URL"
         exit 1
     fi
-fi
 
-sudo qm create $VMID --name "$VM_NAME" \
-    --ostype l26 \
-    --memory 8192 --balloon 1024 \
-    --agent 1 \
-    --bios ovmf  --efidisk0 $STORAGE:0,pre-enrolled-keys=0 \
-    --cpu host --cores 2  \
-    --vga serial0 --serial0 socket  \
-    --net0 virtio,bridge=vmbr0,mtu=1500
-sudo qm importdisk $VMID $IMAGE_NAME $STORAGE
-sudo qm set $VMID --scsihw virtio-scsi-pci --virtio0 $STORAGE:vm-$VMID-disk-1,discard=on
-sudo qm set $VMID --boot order=virtio0
-sudo qm set $VMID --scsi1 $STORAGE:cloudinit
+    local actual
+    actual=$(sha256sum "$IMAGE_NAME" | awk '{print $1}')
 
-# Create cloud-init configuration
-#
-# Note: Snippets need to be enabled for the data store in Proxmox
-# See: https://pve.proxmox.com/pve-docs/pve-admin-guide.html#_common_storage_properties
+    if [[ "$expected" != "$actual" ]]; then
+        echo "Error: Checksum mismatch for $IMAGE_NAME"
+        echo "  Expected: $expected"
+        echo "  Actual:   $actual"
+        exit 1
+    fi
+    echo "Checksum verified: $IMAGE_NAME"
+}
 
-# Apply cloud-init configuration
-echo "$CLOUD_INIT_CONFIG" | sudo tee /var/lib/vz/snippets/${VMID}.yaml
+create_vm() {
+    if sudo qm status "$VMID" &>/dev/null; then
+        if [[ "$DELETION_MODE" == "skip" ]]; then
+            echo "VM/template $VMID already exists. Skipping creation (DELETION_MODE=skip)."
+            exit 0
+        elif [[ "$DELETION_MODE" == "force" ]]; then
+            sudo qm destroy "$VMID" --destroy-unreferenced-disks && echo "Destroyed existing VM/template: $VMID"
+        else
+            echo "Invalid DELETION_MODE: $DELETION_MODE. Use 'force' or 'skip'."
+            exit 1
+        fi
+    fi
 
-# Create the VM
-sudo qm set $VMID --cicustom "vendor=local:snippets/${VMID}.yaml"
-sudo qm set $VMID --tags ${VM_NAME},${OS_NAME}-${OS_VERSION},cloudinit
-sudo qm set $VMID --ciuser ${CI_USER}
-sudo qm set $VMID --sshkeys ${SSH_KEY}
-sudo qm set $VMID --ipconfig0 ip=dhcp
+    sudo qm create "$VMID" --name "$VM_NAME" \
+        --ostype l26 \
+        --memory 8192 --balloon 1024 \
+        --agent 1 \
+        --bios ovmf --efidisk0 "$STORAGE":0,pre-enrolled-keys=0 \
+        --cpu host --cores 2 \
+        --vga serial0 --serial0 socket \
+        --net0 virtio,bridge=vmbr0,mtu=1500
+    VM_CREATED=true
+    sudo qm importdisk "$VMID" "$IMAGE_NAME" "$STORAGE"
+    sudo qm set "$VMID" --scsihw virtio-scsi-pci --virtio0 "$STORAGE":vm-"$VMID"-disk-1,discard=on
+    sudo qm set "$VMID" --boot order=virtio0
+    sudo qm set "$VMID" --scsi1 "$STORAGE":cloudinit
+}
 
-# Convert the VM to a template
-sudo qm template $VMID
+configure_cloud_init() {
+    # Snippets must be enabled for the datastore in Proxmox
+    # See: https://pve.proxmox.com/pve-docs/pve-admin-guide.html#_common_storage_properties
+    echo "$CLOUD_INIT_CONFIG" | sudo tee /var/lib/vz/snippets/"${VMID}".yaml
+    sudo qm set "$VMID" --cicustom "vendor=local:snippets/${VMID}.yaml"
+    sudo qm set "$VMID" --tags "${VM_NAME},${OS_NAME}-${OS_VERSION},cloudinit"
+    sudo qm set "$VMID" --ciuser "${CI_USER}"
+    sudo qm set "$VMID" --sshkeys "${SSH_KEY}"
+    sudo qm set "$VMID" --ipconfig0 ip=dhcp
+}
 
-echo "Successfully created template $VM_NAME (ID: $VMID)"
+convert_to_template() {
+    sudo qm template "$VMID"
+    echo "Successfully created template $VM_NAME (ID: $VMID)"
+}
+
+parse_args "$@"
+validate_config
+download_image
+verify_checksum
+create_vm
+configure_cloud_init
+convert_to_template
