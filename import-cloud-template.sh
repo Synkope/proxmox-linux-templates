@@ -68,18 +68,7 @@ validate_config() {
     VM_NAME="${OS_NAME}-${OS_VERSION}-template"
 }
 
-download_image() {
-    if [[ -f "$IMAGE_NAME" && "$REFRESH" != "true" ]]; then
-        IMAGE_PREEXISTED=true
-        echo "Using cached image: $IMAGE_NAME"
-    else
-        echo "Downloading: $DOWNLOAD_URL"
-        wget "$DOWNLOAD_URL" -O "$IMAGE_NAME"
-    fi
-}
-
-verify_checksum() {
-    echo "Fetching checksum file: $CHECKSUM_URL"
+fetch_expected_hash() {
     local checksum_file
     checksum_file=$(mktemp)
     wget -q "$CHECKSUM_URL" -O "$checksum_file" || {
@@ -87,30 +76,50 @@ verify_checksum() {
         rm -f "$checksum_file"
         exit 1
     }
-
     local expected
-    if grep -q "($IMAGE_NAME)" "$checksum_file"; then
-        # BSD format: SHA256 (filename) = hash
-        expected=$(grep "($IMAGE_NAME)" "$checksum_file" | awk '{print $NF}')
+    if grep -qF "($IMAGE_NAME)" "$checksum_file"; then
+        expected=$(grep -F "($IMAGE_NAME)" "$checksum_file" | awk '{print $NF}')
     else
-        # GNU format: hash  filename
-        expected=$(grep "$IMAGE_NAME" "$checksum_file" | awk '{print $1}')
+        expected=$(grep -F "$IMAGE_NAME" "$checksum_file" | awk '{print $1}')
     fi
     rm -f "$checksum_file"
-
     if [[ -z "$expected" ]]; then
         echo "Error: Could not find entry for '$IMAGE_NAME' in $CHECKSUM_URL"
         exit 1
     fi
+    echo "$expected"
+}
 
-    echo "Computing checksum: $IMAGE_NAME"
-    local actual
+compute_hash() {
     if [[ "$CHECKSUM_URL" == *SHA512* || "$CHECKSUM_URL" == *sha512* ]]; then
-        actual=$(sha512sum "$IMAGE_NAME" | awk '{print $1}')
+        sha512sum "$IMAGE_NAME" | awk '{print $1}'
     else
-        actual=$(sha256sum "$IMAGE_NAME" | awk '{print $1}')
+        sha256sum "$IMAGE_NAME" | awk '{print $1}'
     fi
+}
 
+download_image() {
+    if [[ -f "$IMAGE_NAME" && "$REFRESH" != "true" ]]; then
+        echo "Checking cached image: $IMAGE_NAME"
+        local expected actual
+        expected=$(fetch_expected_hash)
+        actual=$(compute_hash)
+        if [[ "$expected" == "$actual" ]]; then
+            IMAGE_PREEXISTED=true
+            echo "Cached image is up to date: $IMAGE_NAME"
+            return
+        fi
+        echo "Cached image is outdated, re-downloading..."
+    fi
+    echo "Downloading: $DOWNLOAD_URL"
+    wget "$DOWNLOAD_URL" -O "$IMAGE_NAME"
+}
+
+verify_checksum() {
+    echo "Verifying checksum: $IMAGE_NAME"
+    local expected actual
+    expected=$(fetch_expected_hash)
+    actual=$(compute_hash)
     if [[ "$expected" != "$actual" ]]; then
         echo "Error: Checksum mismatch for $IMAGE_NAME"
         echo "  Expected: $expected"
