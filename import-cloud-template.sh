@@ -72,7 +72,7 @@ fetch_expected_hash() {
     local checksum_file
     checksum_file=$(mktemp)
     wget -q "$CHECKSUM_URL" -O "$checksum_file" || {
-        echo "Error: Failed to download checksum file from $CHECKSUM_URL (HTTP error or URL not found)"
+        echo "Error: Failed to download checksum file from $CHECKSUM_URL (HTTP error or URL not found)" >&2
         rm -f "$checksum_file"
         exit 1
     }
@@ -84,7 +84,7 @@ fetch_expected_hash() {
     fi
     rm -f "$checksum_file"
     if [[ -z "$expected" ]]; then
-        echo "Error: Could not find entry for '$IMAGE_NAME' in $CHECKSUM_URL"
+        echo "Error: Could not find entry for '$IMAGE_NAME' in $CHECKSUM_URL" >&2
         exit 1
     fi
     echo "$expected"
