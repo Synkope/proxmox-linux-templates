@@ -34,6 +34,7 @@ parse_args() {
                     echo "Error: Missing config file parameter."
                     exit 1
                 elif [[ -f "$2" ]]; then
+                    # shellcheck source=/dev/null
                     source "$2"
                     shift
                 else
@@ -65,6 +66,10 @@ validate_config() {
             exit 1
         fi
     done
+    if [[ ! -f "$SSH_KEY" ]]; then
+        echo "Error: SSH key not found: $SSH_KEY"
+        exit 1
+    fi
     VM_NAME="${OS_NAME}-${OS_VERSION}-template"
 }
 
@@ -129,11 +134,6 @@ verify_checksum() {
     echo "Checksum OK: $IMAGE_NAME"
 }
 
-resize_image() {
-    echo "Resizing image to $IMAGE_SIZE"
-    qemu-img resize "$IMAGE_NAME" "$IMAGE_SIZE"
-}
-
 create_vm() {
     if sudo qm status "$VMID" &>/dev/null; then
         if [[ "$DELETION_MODE" == "skip" ]]; then
@@ -158,6 +158,7 @@ create_vm() {
     VM_CREATED=true
     sudo qm importdisk "$VMID" "$IMAGE_NAME" "$STORAGE"
     sudo qm set "$VMID" --scsihw virtio-scsi-pci --virtio0 "$STORAGE":vm-"$VMID"-disk-1,discard=on
+    sudo qm resize "$VMID" virtio0 "$IMAGE_SIZE"
     sudo qm set "$VMID" --boot order=virtio0
     sudo qm set "$VMID" --scsi1 "$STORAGE":cloudinit
 }
@@ -182,7 +183,6 @@ parse_args "$@"
 validate_config
 download_image
 verify_checksum
-resize_image
 create_vm
 configure_cloud_init
 convert_to_template
